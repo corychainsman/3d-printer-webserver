@@ -103,7 +103,7 @@ def index(settings: Settings = Depends(get_settings)) -> str:
     .ams-label {{ margin-top: 14px; margin-bottom: 10px; }}
     .upload-row {{
       display: grid;
-      gap: 8px;
+      gap: 6px;
       margin-bottom: 12px;
     }}
     .upload-meta {{
@@ -144,6 +144,14 @@ def index(settings: Settings = Depends(get_settings)) -> str:
       min-height: 26px;
       padding: 4px 12px;
       font-weight: 400;
+    }}
+    .file-trigger.btn {{
+      border: 2px solid #000;
+      box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 4px #000;
+    }}
+    .theme-win98 .file-trigger.btn {{
+      border: 2px outset #fff;
+      box-shadow: 1px 1px 0 #000;
     }}
     input, select, button {{
       width: 100%;
