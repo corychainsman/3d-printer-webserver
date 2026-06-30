@@ -513,6 +513,7 @@ const win98ThemeEl = document.querySelector("#win98Theme");
 const loader = new STLLoader();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
+camera.up.set(0, 0, 1);
 const renderer = new THREE.WebGLRenderer({{ canvas: previewCanvas, antialias: true, alpha: true }});
 const controls = new OrbitControls(camera, previewCanvas);
 const plate = new THREE.Group();
@@ -524,6 +525,7 @@ let fitToObjects = false;
 scene.add(new THREE.HemisphereLight(0xffffff, 0x6f776f, 2.4));
 scene.add(plate);
 controls.enableDamping = true;
+controls.screenSpacePanning = false;
 controls.target.set(0, 0, 0);
 
 function applyTheme(theme) {{
@@ -602,6 +604,27 @@ function previewBounds() {{
   return sphere;
 }}
 
+function cameraFrame() {{
+  const targets = plate.children.filter((child) => child !== bed);
+  const targetBox = new THREE.Box3();
+  const frameBox = new THREE.Box3();
+  if (targets.length) {{
+    for (const child of targets) {{
+      targetBox.expandByObject(child);
+      frameBox.expandByObject(child);
+    }}
+    if (!fitToObjects) frameBox.expandByObject(bed);
+  }} else {{
+    targetBox.setFromObject(bed);
+    frameBox.copy(targetBox);
+  }}
+  const targetSphere = new THREE.Sphere();
+  const frameSphere = new THREE.Sphere();
+  targetBox.getBoundingSphere(targetSphere);
+  frameBox.getBoundingSphere(frameSphere);
+  return {{ targetSphere, frameSphere }};
+}}
+
 function arrangePreview() {{
   clearPreviewModels();
   if (!fileEntries.length) return;
@@ -650,15 +673,17 @@ function arrangePreview() {{
 }}
 
 function setAxisView(axis, sign = 1) {{
-  const sphere = previewBounds();
-  const distance = Math.max(fitToObjects ? 36 : 320, sphere.radius * (fitToObjects ? 2.6 : 2.2));
-  const targetZ = Math.min(Math.max(sphere.center.z, 0), 80);
-  controls.target.set(sphere.center.x, sphere.center.y, targetZ);
-  if (axis === "x") camera.position.set(sphere.center.x + sign * distance, sphere.center.y, targetZ);
-  if (axis === "y") camera.position.set(sphere.center.x, sphere.center.y + sign * distance, targetZ);
-  if (axis === "z") camera.position.set(sphere.center.x, sphere.center.y, targetZ + distance);
+  const {{ targetSphere, frameSphere }} = cameraFrame();
+  const targetZ = Math.max(targetSphere.center.z, 0);
+  const distance = Math.max(fitToObjects ? 36 : 320, frameSphere.radius * (fitToObjects ? 2.6 : 2.2));
+  controls.target.set(targetSphere.center.x, targetSphere.center.y, targetZ);
+  if (axis === "x") camera.position.set(targetSphere.center.x + sign * distance, targetSphere.center.y, targetZ);
+  if (axis === "y") camera.position.set(targetSphere.center.x, targetSphere.center.y + sign * distance, targetZ);
+  if (axis === "z") camera.position.set(targetSphere.center.x, targetSphere.center.y, targetZ + distance);
   camera.up.set(0, 0, 1);
   if (axis === "z") camera.up.set(0, 1, 0);
+  controls.minDistance = Math.max(1, frameSphere.radius * 0.15);
+  controls.maxDistance = Math.max(800, frameSphere.radius * 8);
   controls.update();
 }}
 
@@ -678,12 +703,14 @@ function setCornerView(index = isoIndex, advance = true) {{
   ];
   const [sx, sy] = corners[index % corners.length];
   if (advance) isoIndex = (index + 1) % corners.length;
-  const sphere = previewBounds();
-  const distance = Math.max(fitToObjects ? 42 : 360, sphere.radius * (fitToObjects ? 2.8 : 2.1));
-  const targetZ = Math.min(Math.max(sphere.center.z, 0), 80);
-  controls.target.set(sphere.center.x, sphere.center.y, targetZ);
-  camera.position.set(sphere.center.x + sx * distance * 0.72, sphere.center.y + sy * distance * 0.72, targetZ + distance * 0.58);
+  const {{ targetSphere, frameSphere }} = cameraFrame();
+  const distance = Math.max(fitToObjects ? 42 : 360, frameSphere.radius * (fitToObjects ? 2.8 : 2.1));
+  const targetZ = Math.max(targetSphere.center.z, 0);
+  controls.target.set(targetSphere.center.x, targetSphere.center.y, targetZ);
+  camera.position.set(targetSphere.center.x + sx * distance * 0.72, targetSphere.center.y + sy * distance * 0.72, targetZ + distance * 0.58);
   camera.up.set(0, 0, 1);
+  controls.minDistance = Math.max(1, frameSphere.radius * 0.15);
+  controls.maxDistance = Math.max(800, frameSphere.radius * 8);
   controls.update();
 }}
 
@@ -803,7 +830,7 @@ function animatePreview() {{
 filesEl.addEventListener("change", loadPreviewFile);
 viewXEl.addEventListener("click", () => toggleAxis("x", viewXEl));
 viewYEl.addEventListener("click", () => toggleAxis("y", viewYEl));
-viewIsoEl.addEventListener("click", setCornerView);
+viewIsoEl.addEventListener("click", () => setCornerView());
 viewZEl.addEventListener("click", () => setAxisView("z"));
 zoomInEl.addEventListener("click", () => zoomBy(0.78));
 zoomOutEl.addEventListener("click", () => zoomBy(1.28));
