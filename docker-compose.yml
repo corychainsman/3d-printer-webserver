@@ -1,0 +1,34 @@
+services:
+  3d-printer-webserver:
+    image: "${APP_IMAGE:-3d-printer-webserver:local}"
+    build:
+      context: .
+    container_name: "${CONTAINER_NAME:-3d-printer-webserver}"
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8088}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BAMBU_HOST: "${BAMBU_HOST}"
+      BAMBU_SERIAL: "${BAMBU_SERIAL}"
+      BAMBU_ACCESS_CODE: "${BAMBU_ACCESS_CODE}"
+      BAMBU_MQTT_PORT: "${BAMBU_MQTT_PORT:-8883}"
+      BAMBU_FTPS_PORT: "${BAMBU_FTPS_PORT:-990}"
+      DEFAULT_INFILL_DENSITY: "${DEFAULT_INFILL_DENSITY:-15}"
+      DEFAULT_WALL_LOOPS: "${DEFAULT_WALL_LOOPS:-2}"
+      DEFAULT_PLATE_INDEX: "${DEFAULT_PLATE_INDEX:-1}"
+      SLICER_BIN: "${SLICER_BIN:-/slicer/BambuStudio.AppImage}"
+      SLICER_USE_XVFB: "${SLICER_USE_XVFB:-true}"
+      SLICER_PLATE_INDEX: "${SLICER_PLATE_INDEX:-0}"
+      SLICER_TIMEOUT_SECONDS: "${SLICER_TIMEOUT_SECONDS:-900}"
+      MACHINE_PROFILE: "${MACHINE_PROFILE:-/config/machine.json}"
+      PROCESS_PROFILE: "${PROCESS_PROFILE:-/config/process.json}"
+      FILAMENT_PROFILE_DIR: "${FILAMENT_PROFILE_DIR:-/config/filaments}"
+      FALLBACK_FILAMENT_PROFILE: "${FALLBACK_FILAMENT_PROFILE:-/config/filaments/generic.json}"
+    volumes:
+      - "${CONFIG_DIR:-./config}:/config:ro"
+      - "${DATA_DIR:-./data}:/data"
+      # Put BambuStudio, OrcaSlicer, or a wrapper script here and set SLICER_BIN.
+      - "${SLICER_DIR:-./slicer}:/slicer:ro"

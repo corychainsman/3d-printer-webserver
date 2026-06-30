@@ -1,0 +1,7 @@
+.env
+data/
+slicer/
+__pycache__/
+*.pyc
+config/*.json
+config/filaments/*.json
