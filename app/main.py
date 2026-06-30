@@ -46,7 +46,13 @@ def index(settings: Settings = Depends(get_settings)) -> str:
     main {{ max-width: 1120px; margin: 0 auto; }}
     .print-window {{ margin: 0; min-width: 0; width: 100%; }}
     .print-window .title-bar {{ margin: 0; }}
-    .print-window .title {{ font-size: 1.2rem; }}
+    .print-window .title {{
+      max-width: min(72vw, 620px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 1rem;
+    }}
     .win-controls {{ display: none; }}
     .theme-win98 .mac-control {{ display: none; }}
     .theme-win98 .win-controls {{ display: flex; }}
@@ -71,12 +77,6 @@ def index(settings: Settings = Depends(get_settings)) -> str:
       font-family: "Pixelated MS Sans Serif", Arial, sans-serif;
       font-size: 11px;
       padding: 12px;
-    }}
-    .status {{
-      color: #000;
-      font-size: .9rem;
-      line-height: 1.25;
-      text-align: right;
     }}
     form {{
       background: #fff;
@@ -117,6 +117,7 @@ def index(settings: Settings = Depends(get_settings)) -> str:
     .file-picker-row {{
       display: flex;
       align-items: center;
+      width: 100%;
     }}
     .file-input {{
       position: absolute;
@@ -136,7 +137,8 @@ def index(settings: Settings = Depends(get_settings)) -> str:
       font-weight: 750;
       cursor: pointer;
       white-space: nowrap;
-      width: auto;
+      width: 100%;
+      box-sizing: border-box;
     }}
     .theme-win98 .file-trigger {{
       min-height: 26px;
@@ -303,10 +305,15 @@ def index(settings: Settings = Depends(get_settings)) -> str:
       align-items: center;
       gap: 10px;
     }}
-    .file-controls, .job-settings {{
+    .file-controls {{
       display: grid;
       grid-template-columns: repeat(4, minmax(66px, 1fr));
       gap: 8px;
+    }}
+    .job-settings {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
     }}
     .file-menu {{ position: relative; justify-self: end; align-self: center; display: flex; align-items: center; }}
     .menu-button {{ min-width: 34px; height: 34px; font-weight: 750; display: inline-flex; align-items: center; justify-content: center; }}
@@ -353,12 +360,12 @@ def index(settings: Settings = Depends(get_settings)) -> str:
     }}
     @media (max-width: 620px) {{
       body {{ padding: 14px; }}
-      .status {{ text-align: left; }}
       .upload-meta {{ display: grid; gap: 3px; }}
       .file-picker-row {{ align-items: stretch; }}
       .workspace {{ display: block; }}
       .preview {{ height: 300px; }}
-      .file-controls, .job-settings {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .file-controls {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .job-settings {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .action-panel {{ position: static; margin-top: 16px; }}
     }}
     @media (min-width: 621px) and (max-width: 980px) {{
@@ -368,9 +375,26 @@ def index(settings: Settings = Depends(get_settings)) -> str:
     }}
     #submit {{
       margin-top: 14px;
+      min-height: 46px;
+      width: 100%;
+      background: #000;
+      color: #fff;
+      border: 2px solid #000;
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #000;
       font-weight: 750;
+      font-size: 1.05rem;
     }}
     #submit:disabled {{ color: #777; }}
+    .theme-win98 #submit {{
+      min-height: 34px;
+      background: #000080;
+      color: #fff;
+      border: 2px outset #fff;
+      box-shadow: 1px 1px 0 #000;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .theme-win98 #submit:active {{ border-style: inset; }}
     .hint, #message {{ color: #000; font-size: .92rem; margin-bottom: 0; }}
     .error {{ color: #000; font-weight: 750; }}
     .ok {{ color: #000; font-weight: 750; }}
@@ -386,7 +410,7 @@ def index(settings: Settings = Depends(get_settings)) -> str:
   <form id="printForm" class="window print-window">
     <div class="title-bar">
       <button aria-label="Close" class="close mac-control" type="button"></button>
-      <h1 class="title title-bar-text">3D Printing</h1>
+      <h1 id="windowTitle" class="title title-bar-text">Checking printer...</h1>
       <div class="title-bar-controls win-controls" aria-hidden="true">
         <button aria-label="Minimize" type="button"></button>
         <button aria-label="Maximize" type="button"></button>
@@ -401,7 +425,6 @@ def index(settings: Settings = Depends(get_settings)) -> str:
         <div class="upload-row">
           <div class="upload-meta">
             <label for="files">STL file(s)</label>
-            <div id="status" class="status">Checking printer...</div>
             <input id="files" class="file-input" type="file" accept=".stl,model/stl" multiple />
           </div>
           <div class="file-picker-row">
@@ -457,7 +480,7 @@ import * as THREE from "https://esm.sh/three@0.165.0";
 import {{ STLLoader }} from "https://esm.sh/three@0.165.0/examples/jsm/loaders/STLLoader.js";
 import {{ OrbitControls }} from "https://esm.sh/three@0.165.0/examples/jsm/controls/OrbitControls.js";
 
-const statusEl = document.querySelector("#status");
+const statusEl = document.querySelector("#windowTitle");
 const slotEl = document.querySelector("#slot");
 const slotListEl = document.querySelector("#slotList");
 const formEl = document.querySelector("#printForm");
@@ -854,10 +877,12 @@ async function loadStatus() {{
     }}
     if (data.trays.length) chooseTray(data.trays[0].slot);
     statusEl.textContent = data.trays.length ? `Ready | ${{data.trays.length}} AMS trays | {html.escape(settings.bambu_host)}` : `No AMS trays | {html.escape(settings.bambu_host)}`;
-    statusEl.className = data.trays.length ? "status ok" : "status error";
+    statusEl.classList.toggle("ok", Boolean(data.trays.length));
+    statusEl.classList.toggle("error", !data.trays.length);
   }} catch (err) {{
     statusEl.textContent = err.message;
-    statusEl.className = "status error";
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
   }}
 }}
 
