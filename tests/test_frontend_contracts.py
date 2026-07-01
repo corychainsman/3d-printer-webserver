@@ -5,6 +5,12 @@ def _html(settings):
     return index(settings)
 
 
+def _submit_handler(html):
+    start = html.index('formEl.addEventListener("submit"')
+    end = html.index("renderPlaceholderTrays();", start)
+    return html[start:end]
+
+
 def test_upload_control_accepts_multiple_stls_and_appends(settings):
     html = _html(settings)
 
@@ -34,21 +40,26 @@ def test_file_rows_have_stable_remove_identity_and_async_parse_guard(settings):
 
 def test_per_file_controls_and_submit_formdata_contract(settings):
     html = _html(settings)
+    submit_handler = _submit_handler(html)
 
     assert '"Copies", "copy_counts", "1", "1", "99"' in html
     assert '"Rot X", "rot_x", "0", "-360", "360"' in html
     assert '"Rot Y", "rot_y", "0", "-360", "360"' in html
     assert '"Rot Z", "rot_z", "0", "-360", "360"' in html
     assert "input.addEventListener(\"input\", () =>" in html
-    assert 'data.append("infill_density", infillEl.value);' in html
-    assert 'data.append("wall_loops", wallsEl.value);' in html
-    assert 'data.append("files", entry.file, entry.file.name);' in html
-    assert 'data.append("copy_counts", entry.input.value);' in html
-    assert 'data.append("rot_x", entry.rotX.value);' in html
-    assert 'data.append("rot_y", entry.rotY.value);' in html
-    assert 'data.append("rot_z", entry.rotZ.value);' in html
-    assert 'data.append("ams_slot", slotEl.value);' in html
-    assert "Choose at least one STL file" in html
+    assert "const formData = new FormData();" in submit_handler
+    assert 'formData.append("infill_density", infillEl.value);' in submit_handler
+    assert 'formData.append("wall_loops", wallsEl.value);' in submit_handler
+    assert 'formData.append("files", entry.file, entry.file.name);' in submit_handler
+    assert 'formData.append("copy_counts", entry.input.value);' in submit_handler
+    assert 'formData.append("rot_x", entry.rotX.value);' in submit_handler
+    assert 'formData.append("rot_y", entry.rotY.value);' in submit_handler
+    assert 'formData.append("rot_z", entry.rotZ.value);' in submit_handler
+    assert 'formData.append("ams_slot", slotEl.value);' in submit_handler
+    assert 'body: formData' in submit_handler
+    assert "const result = await res.json();" in submit_handler
+    assert "const data = await res.json();" not in submit_handler
+    assert "Choose at least one STL file" in submit_handler
 
 
 def test_ams_status_placeholders_color_swatches_and_busy_title(settings):

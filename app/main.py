@@ -935,25 +935,25 @@ formEl.addEventListener("submit", async (event) => {{
     msgEl.className = "error";
     return;
   }}
-  const data = new FormData();
-  data.append("infill_density", infillEl.value);
-  data.append("wall_loops", wallsEl.value);
+  const formData = new FormData();
+  formData.append("infill_density", infillEl.value);
+  formData.append("wall_loops", wallsEl.value);
   for (const entry of fileEntries) {{
-    data.append("files", entry.file, entry.file.name);
-    data.append("copy_counts", entry.input.value);
-    data.append("rot_x", entry.rotX.value);
-    data.append("rot_y", entry.rotY.value);
-    data.append("rot_z", entry.rotZ.value);
+    formData.append("files", entry.file, entry.file.name);
+    formData.append("copy_counts", entry.input.value);
+    formData.append("rot_x", entry.rotX.value);
+    formData.append("rot_y", entry.rotY.value);
+    formData.append("rot_z", entry.rotZ.value);
   }}
-  data.append("ams_slot", slotEl.value);
+  formData.append("ams_slot", slotEl.value);
   submitEl.disabled = true;
   msgEl.textContent = "Uploading and slicing...";
   msgEl.className = "";
   try {{
-    const res = await fetch("/api/print", {{ method: "POST", body: data }});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Print failed");
-    msgEl.textContent = data.message;
+    const res = await fetch("/api/print", {{ method: "POST", body: formData }});
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || "Print failed");
+    msgEl.textContent = result.message;
     msgEl.className = "ok";
   }} catch (err) {{
     msgEl.textContent = err.message;
