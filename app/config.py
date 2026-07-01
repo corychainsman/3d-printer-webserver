@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     bambu_access_code: str = Field(alias="BAMBU_ACCESS_CODE")
     bambu_mqtt_port: int = Field(default=8883, alias="BAMBU_MQTT_PORT")
     bambu_ftps_port: int = Field(default=990, alias="BAMBU_FTPS_PORT")
+    bambu_connect_cmd: str | None = Field(default=None, alias="BAMBU_CONNECT_CMD")
 
     default_infill_density: int = Field(default=15, alias="DEFAULT_INFILL_DENSITY")
     default_wall_loops: int = Field(default=2, alias="DEFAULT_WALL_LOOPS")

@@ -228,6 +228,10 @@ class BambuClient:
                 with self._lock:
                     if self._last_ack is not None:
                         last_ack = self._last_ack
+                        print_ack = last_ack.get("print", {})
+                        if str(print_ack.get("result", "")).lower() == "failed":
+                            reason = print_ack.get("reason") or "printer rejected MQTT print command"
+                            raise RuntimeError(f"Printer rejected MQTT print command: {reason}")
                     if self._last_report is not None:
                         last_state = print_state_from_status(self._last_report)
                         if printer_busy_reason(self._last_report):

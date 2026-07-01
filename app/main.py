@@ -2,11 +2,14 @@ import html
 import io
 import json
 import shutil
+import shlex
+import subprocess
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
 from threading import Thread
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -1051,6 +1054,39 @@ def status(settings: Settings = Depends(get_settings)):
 ProgressCallback = Callable[[str], None]
 
 
+def bambu_connect_uri(project_path: Path) -> str:
+    return (
+        "bambu-connect://import-file"
+        f"?path={quote(str(project_path), safe='')}"
+        f"&name={quote(project_path.stem, safe='')}"
+        "&version=1.0.0"
+    )
+
+
+def handoff_to_bambu_connect(settings: Settings, project_path: Path) -> dict:
+    if not settings.bambu_connect_cmd:
+        raise RuntimeError("BAMBU_CONNECT_CMD is not configured")
+    uri = bambu_connect_uri(project_path)
+    command = settings.bambu_connect_cmd.format(
+        path=shlex.quote(str(project_path)),
+        name=shlex.quote(project_path.stem),
+        uri=shlex.quote(uri),
+    )
+    result = subprocess.run(
+        command,
+        shell=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0:
+        output = (result.stdout or "").strip()
+        raise RuntimeError(f"Bambu Connect handoff failed with exit {result.returncode}: {output}")
+    return {"sent": True, "started": None, "method": "bambu_connect", "output": (result.stdout or "").strip()}
+
+
 def run_print_job(
     files: list[UploadFile] = File(...),
     infill_density: int = Form(..., ge=0, le=100),
@@ -1128,18 +1164,23 @@ def run_print_job(
             infill_density=infill_density,
             wall_loops=wall_loops,
         )
-        step("Uploading sliced 3MF to printer storage")
-        remote_url = client.upload_project(project_path)
-        step("Sending print command to printer")
-        step("Waiting for printer to report PREPARE or RUNNING")
-        result = client.start_print(remote_url, ams_slot=selected.slot, plate_index=settings.default_plate_index)
+        if settings.bambu_connect_cmd:
+            step("Handing sliced 3MF to Bambu Connect")
+            result = handoff_to_bambu_connect(settings, project_path)
+            remote_url = bambu_connect_uri(project_path)
+        else:
+            step("Uploading sliced 3MF to printer storage")
+            remote_url = client.upload_project(project_path)
+            step("Sending print command to printer")
+            step("Waiting for printer to report PREPARE or RUNNING")
+            result = client.start_print(remote_url, ams_slot=selected.slot, plate_index=settings.default_plate_index)
     except SlicerError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     total_parts = sum(copy_counts)
-    printer_state = result.get("printer_state") or "starting"
+    printer_state = result.get("printer_state") or result.get("method") or "starting"
     return {
         "message": (
             f"Print started ({printer_state}): "

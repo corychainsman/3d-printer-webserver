@@ -180,6 +180,47 @@ def test_snapshot_uploads_owns_file_handles_after_original_closes():
     assert snapshots[0].file.read() == b"solid original\nendsolid original\n"
 
 
+def test_bambu_connect_uri_encodes_project_path():
+    uri = main.bambu_connect_uri(Path("/data/jobs/test cube.gcode.3mf"))
+
+    assert uri == (
+        "bambu-connect://import-file"
+        "?path=%2Fdata%2Fjobs%2Ftest%20cube.gcode.3mf"
+        "&name=test%20cube.gcode"
+        "&version=1.0.0"
+    )
+
+
+def test_handoff_to_bambu_connect_runs_configured_command(settings_factory, monkeypatch, tmp_path):
+    project = tmp_path / "test cube.gcode.3mf"
+    project.write_bytes(b"3mf")
+    settings = settings_factory(BAMBU_CONNECT_CMD="connect-send --file {path} --name {name} --uri {uri}")
+    calls = []
+
+    def fake_run(command, shell, text, stdout, stderr, timeout, check):
+        calls.append(
+            {
+                "command": command,
+                "shell": shell,
+                "text": text,
+                "timeout": timeout,
+                "check": check,
+            }
+        )
+        return type("Result", (), {"returncode": 0, "stdout": "ok"})()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    result = main.handoff_to_bambu_connect(settings, project)
+
+    assert result == {"sent": True, "started": None, "method": "bambu_connect", "output": "ok"}
+    assert calls[0]["shell"] is True
+    assert calls[0]["timeout"] == 120
+    assert "connect-send --file" in calls[0]["command"]
+    assert "'/tmp/" in calls[0]["command"]
+    assert "bambu-connect%3A" not in calls[0]["command"]
+
+
 def test_print_job_rejects_empty_file_list_before_printer_access(settings, monkeypatch):
     monkeypatch.setattr(main, "bambu_client", lambda settings: pytest.fail("printer should not be touched"))
 

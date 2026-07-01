@@ -142,6 +142,48 @@ def test_start_print_raises_when_printer_does_not_leave_ready_state(monkeypatch)
     assert "did not start printing" in str(exc.value)
 
 
+def test_start_print_raises_immediately_when_printer_rejects_command(monkeypatch):
+    client = BambuClient("host", "SERIAL", "code")
+
+    class Info:
+        def wait_for_publish(self, timeout):
+            pass
+
+    class FakeMqtt:
+        def connect(self, host, port, keepalive):
+            pass
+
+        def subscribe(self, topic, qos):
+            pass
+
+        def loop_start(self):
+            pass
+
+        def publish(self, topic, payload, qos):
+            client._last_ack = {
+                "print": {
+                    "command": "project_file",
+                    "result": "failed",
+                    "reason": "mqtt message verify failed",
+                }
+            }
+            client._ack_event.set()
+            return Info()
+
+        def loop_stop(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+    monkeypatch.setattr(client, "_client", lambda: FakeMqtt())
+
+    with pytest.raises(RuntimeError) as exc:
+        client.start_print("file:///sdcard/cache/job.3mf", ams_slot=0, timeout=1)
+
+    assert str(exc.value) == "Printer rejected MQTT print command: mqtt message verify failed"
+
+
 def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, tmp_path):
     local_file = tmp_path / "plate.3mf"
     local_file.write_bytes(b"3mf")

@@ -60,6 +60,7 @@ APP_IMAGE=3d-printer-webserver:local
 CONTAINER_NAME=3d-printer-webserver
 BAMBU_MQTT_PORT=8883
 BAMBU_FTPS_PORT=990
+BAMBU_CONNECT_CMD=
 DEFAULT_INFILL_DENSITY=15
 DEFAULT_WALL_LOOPS=2
 DEFAULT_PLATE_INDEX=1
@@ -118,6 +119,28 @@ For Bambu Lab H2D profiles, keep the exported H2D template JSON files beside
 single-material runtime profile for CLI slicing, then merges those local
 template files back in so H2D start, end, layer-change, and filament-change
 G-code remain intact.
+
+## Bambu Connect Handoff
+
+Current Bambu firmware may reject direct local MQTT print starts in cloud mode
+with `mqtt message verify failed`. If you have a Linux-compatible Bambu Connect
+bridge, set `BAMBU_CONNECT_CMD` to a command template. The app will slice the
+3MF and call that command instead of sending the raw MQTT `project_file`
+command.
+
+Available placeholders:
+
+```text
+{path}  absolute path to the sliced 3MF inside the container
+{name}  3MF filename without extension
+{uri}   bambu-connect://import-file?... URL
+```
+
+Example:
+
+```text
+BAMBU_CONNECT_CMD=/usr/local/bin/bambu-connect-send --file {path}
+```
 
 ## Local Docker Compose
 
