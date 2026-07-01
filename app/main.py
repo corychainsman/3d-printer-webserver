@@ -1,10 +1,14 @@
 import html
+import json
 import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from queue import Queue
+from threading import Thread
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .bambu import BambuClient, ams_trays_from_status, print_state_from_status, printer_busy_reason
 from .config import Settings, get_settings
@@ -947,14 +951,46 @@ formEl.addEventListener("submit", async (event) => {{
   }}
   formData.append("ams_slot", slotEl.value);
   submitEl.disabled = true;
-  msgEl.textContent = "Uploading and slicing...";
+  msgEl.textContent = "Starting print workflow...";
   msgEl.className = "";
   try {{
-    const res = await fetch("/api/print", {{ method: "POST", body: formData }});
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.detail || "Print failed");
-    msgEl.textContent = result.message;
-    msgEl.className = "ok";
+    const res = await fetch("/api/print/progress", {{ method: "POST", body: formData }});
+    if (!res.ok || !res.body) throw new Error("Print failed");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalEvent = null;
+    while (true) {{
+      const read = await reader.read();
+      if (read.done) break;
+      buffer += decoder.decode(read.value, {{ stream: true }});
+      const lines = buffer.split("\\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {{
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        finalEvent = event;
+        if (event.type === "progress") {{
+          msgEl.textContent = event.message;
+          msgEl.className = "";
+        }} else if (event.type === "done") {{
+          msgEl.textContent = event.message;
+          msgEl.className = "ok";
+        }} else if (event.type === "error") {{
+          throw new Error(event.message || "Print failed");
+        }}
+      }}
+    }}
+    if (buffer.trim()) {{
+      finalEvent = JSON.parse(buffer);
+      if (finalEvent.type === "done") {{
+        msgEl.textContent = finalEvent.message;
+        msgEl.className = "ok";
+      }} else if (finalEvent.type === "error") {{
+        throw new Error(finalEvent.message || "Print failed");
+      }}
+    }}
+    if (!finalEvent || finalEvent.type !== "done") throw new Error("Print workflow ended without a printer start confirmation");
     await loadStatus();
   }} catch (err) {{
     msgEl.textContent = err.message;
@@ -998,8 +1034,10 @@ def status(settings: Settings = Depends(get_settings)):
     }
 
 
-@app.post("/api/print")
-def print_job(
+ProgressCallback = Callable[[str], None]
+
+
+def run_print_job(
     files: list[UploadFile] = File(...),
     infill_density: int = Form(..., ge=0, le=100),
     wall_loops: int = Form(..., ge=1, le=10),
@@ -1009,7 +1047,12 @@ def print_job(
     rot_z: list[float] = Form(...),
     ams_slot: int = Form(..., ge=0),
     settings: Settings = Depends(get_settings),
+    progress: ProgressCallback | None = None,
 ):
+    def step(message: str) -> None:
+        if progress:
+            progress(message)
+
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one STL file")
     if not (len(files) == len(copy_counts) == len(rot_x) == len(rot_y) == len(rot_z)):
@@ -1021,6 +1064,7 @@ def print_job(
         if count < 1 or count > 99:
             raise HTTPException(status_code=400, detail="Copies must be between 1 and 99")
 
+    step("Checking printer status")
     client = bambu_client(settings)
     try:
         status_report = client.request_status()
@@ -1035,17 +1079,20 @@ def print_job(
     selected = next((tray for tray in trays if tray.slot == ams_slot), None)
     if selected is None:
         raise HTTPException(status_code=400, detail="Selected AMS slot is not available")
+    step(f"Selected {selected.label}")
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.job_dir.mkdir(parents=True, exist_ok=True)
     stl_inputs: list[StlInput] = []
     for index, uploaded in enumerate(files):
         original_name = Path(uploaded.filename or f"model-{index + 1}.stl").name
+        step(f"Saving {original_name}")
         upload_path = settings.upload_dir / f"{uuid.uuid4().hex}-{original_name}"
         transformed_path = settings.upload_dir / f"{uuid.uuid4().hex}-transformed-{original_name}"
         with upload_path.open("wb") as handle:
             shutil.copyfileobj(uploaded.file, handle)
         try:
+            step(f"Applying rotation and bed placement for {original_name}")
             rotate_and_place_on_bed(upload_path, transformed_path, rot_x[index], rot_y[index], rot_z[index])
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not transform {original_name}: {exc}") from exc
@@ -1058,6 +1105,8 @@ def print_job(
         )
 
     try:
+        total_parts = sum(copy_counts)
+        step(f"Slicing {len(files)} STL file(s), {total_parts} total part(s)")
         project_path = slice_stls(
             settings=settings,
             stls=stl_inputs,
@@ -1065,7 +1114,10 @@ def print_job(
             infill_density=infill_density,
             wall_loops=wall_loops,
         )
+        step("Uploading sliced 3MF to printer storage")
         remote_url = client.upload_project(project_path)
+        step("Sending print command to printer")
+        step("Waiting for printer to report PREPARE or RUNNING")
         result = client.start_print(remote_url, ams_slot=selected.slot, plate_index=settings.default_plate_index)
     except SlicerError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1083,3 +1135,71 @@ def print_job(
         "remote_url": remote_url,
         "printer_result": result,
     }
+
+
+@app.post("/api/print")
+def print_job(
+    files: list[UploadFile] = File(...),
+    infill_density: int = Form(..., ge=0, le=100),
+    wall_loops: int = Form(..., ge=1, le=10),
+    copy_counts: list[int] = Form(...),
+    rot_x: list[float] = Form(...),
+    rot_y: list[float] = Form(...),
+    rot_z: list[float] = Form(...),
+    ams_slot: int = Form(..., ge=0),
+    settings: Settings = Depends(get_settings),
+):
+    return run_print_job(files, infill_density, wall_loops, copy_counts, rot_x, rot_y, rot_z, ams_slot, settings)
+
+
+@app.post("/api/print/progress")
+def print_job_progress(
+    files: list[UploadFile] = File(...),
+    infill_density: int = Form(..., ge=0, le=100),
+    wall_loops: int = Form(..., ge=1, le=10),
+    copy_counts: list[int] = Form(...),
+    rot_x: list[float] = Form(...),
+    rot_y: list[float] = Form(...),
+    rot_z: list[float] = Form(...),
+    ams_slot: int = Form(..., ge=0),
+    settings: Settings = Depends(get_settings),
+):
+    def encode(event: dict) -> str:
+        return json.dumps(event) + "\n"
+
+    def stream():
+        queue: Queue[str | None] = Queue()
+
+        def progress(message: str) -> None:
+            queue.put(encode({"type": "progress", "message": message}))
+
+        def worker() -> None:
+            try:
+                result = run_print_job(
+                    files,
+                    infill_density,
+                    wall_loops,
+                    copy_counts,
+                    rot_x,
+                    rot_y,
+                    rot_z,
+                    ams_slot,
+                    settings,
+                    progress,
+                )
+                queue.put(encode({"type": "done", **result}))
+            except HTTPException as exc:
+                queue.put(encode({"type": "error", "status": exc.status_code, "message": str(exc.detail)}))
+            except Exception as exc:
+                queue.put(encode({"type": "error", "status": 500, "message": str(exc)}))
+            finally:
+                queue.put(None)
+
+        Thread(target=worker, daemon=True).start()
+        while True:
+            event = queue.get()
+            if event is None:
+                break
+            yield event
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")

@@ -132,6 +132,45 @@ def test_print_job_success_hands_off_multiple_stls(settings, monkeypatch):
     }
 
 
+def test_run_print_job_reports_backend_progress_steps(settings, monkeypatch):
+    _install_fake_client(monkeypatch, FakeClient())
+    monkeypatch.setattr(main, "rotate_and_place_on_bed", lambda source, destination, *args: Path(destination).write_bytes(b"ok"))
+
+    def fake_slice(settings, stls, filament_type, infill_density, wall_loops):
+        project = settings.job_dir / "project.3mf"
+        project.parent.mkdir(parents=True, exist_ok=True)
+        project.write_bytes(b"project")
+        return project
+
+    monkeypatch.setattr(main, "slice_stls", fake_slice)
+    progress = []
+
+    response = main.run_print_job(
+        files=[upload_file("part.stl")],
+        infill_density=15,
+        wall_loops=2,
+        copy_counts=[1],
+        rot_x=[0],
+        rot_y=[0],
+        rot_z=[0],
+        ams_slot=0,
+        settings=settings,
+        progress=progress.append,
+    )
+
+    assert response["message"].startswith("Print started")
+    assert progress == [
+        "Checking printer status",
+        "Selected AMS 0 slot 0: PLA #F7D959FF",
+        "Saving part.stl",
+        "Applying rotation and bed placement for part.stl",
+        "Slicing 1 STL file(s), 1 total part(s)",
+        "Uploading sliced 3MF to printer storage",
+        "Sending print command to printer",
+        "Waiting for printer to report PREPARE or RUNNING",
+    ]
+
+
 def test_print_job_rejects_empty_file_list_before_printer_access(settings, monkeypatch):
     monkeypatch.setattr(main, "bambu_client", lambda settings: pytest.fail("printer should not be touched"))
 

@@ -57,7 +57,12 @@ def test_per_file_controls_and_submit_formdata_contract(settings):
     assert 'formData.append("rot_z", entry.rotZ.value);' in submit_handler
     assert 'formData.append("ams_slot", slotEl.value);' in submit_handler
     assert 'body: formData' in submit_handler
-    assert "const result = await res.json();" in submit_handler
+    assert 'fetch("/api/print/progress"' in submit_handler
+    assert "res.body.getReader();" in submit_handler
+    assert "new TextDecoder();" in submit_handler
+    assert 'event.type === "progress"' in submit_handler
+    assert "msgEl.textContent = event.message;" in submit_handler
+    assert "Print workflow ended without a printer start confirmation" in submit_handler
     assert "await loadStatus();" in submit_handler
     assert "const data = await res.json();" not in submit_handler
     assert "Choose at least one STL file" in submit_handler
