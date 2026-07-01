@@ -58,6 +58,7 @@ def test_per_file_controls_and_submit_formdata_contract(settings):
     assert 'formData.append("ams_slot", slotEl.value);' in submit_handler
     assert 'body: formData' in submit_handler
     assert "const result = await res.json();" in submit_handler
+    assert "await loadStatus();" in submit_handler
     assert "const data = await res.json();" not in submit_handler
     assert "Choose at least one STL file" in submit_handler
 
@@ -67,6 +68,7 @@ def test_ams_status_placeholders_color_swatches_and_busy_title(settings):
 
     assert 'fetch("/api/status")' in html
     assert 'renderPlaceholderTrays();' in html
+    assert "setInterval(loadStatus, 5000);" in html
     assert "for (let index = 0; index < 8; index++)" in html
     assert "normalizeColor(tray.color)" in html
     assert "if (color) swatch.style.background" in html

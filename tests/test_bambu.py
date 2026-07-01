@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from app import bambu
 from app.bambu import BambuClient, ImplicitFTP_TLS, ams_trays_from_status, print_state_from_status, printer_busy_reason
 from tests.conftest import status_payload
@@ -73,6 +75,7 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
             published["payload"] = json.loads(payload)
             published["qos"] = qos
             client._last_ack = {"print": {"command": "project_file", "result": "success"}}
+            client._last_report = status_payload(state="PREPARE")
             client._ack_event.set()
             return Info()
 
@@ -84,11 +87,16 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
 
     monkeypatch.setattr(client, "_client", lambda: FakeMqtt())
 
-    result = client.start_print("ftp://cache/job.3mf", ams_slot=5, plate_index=2, timeout=0.25)
+    result = client.start_print("file:///sdcard/cache/job.3mf", ams_slot=5, plate_index=2, timeout=0.25)
 
     payload = published["payload"]["print"]
-    assert result == {"sent": True, "ack": {"print": {"command": "project_file", "result": "success"}}}
-    assert payload["url"] == "ftp://cache/job.3mf"
+    assert result == {
+        "sent": True,
+        "started": True,
+        "printer_state": "PREPARE",
+        "ack": {"print": {"command": "project_file", "result": "success"}},
+    }
+    assert payload["url"] == "file:///sdcard/cache/job.3mf"
     assert payload["param"] == "Metadata/plate_2.gcode"
     assert payload["use_ams"] is True
     assert payload["ams_mapping"] == [5]
@@ -96,7 +104,7 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
     assert published["wait_timeout"] == 0.25
 
 
-def test_start_print_returns_sent_when_ack_times_out(monkeypatch):
+def test_start_print_raises_when_printer_does_not_leave_ready_state(monkeypatch):
     client = BambuClient("host", "SERIAL", "code")
 
     class Info:
@@ -124,7 +132,10 @@ def test_start_print_returns_sent_when_ack_times_out(monkeypatch):
 
     monkeypatch.setattr(client, "_client", lambda: FakeMqtt())
 
-    assert client.start_print("ftp://cache/job.3mf", ams_slot=0, timeout=0) == {"sent": True, "ack": None}
+    with pytest.raises(RuntimeError) as exc:
+        client.start_print("file:///sdcard/cache/job.3mf", ams_slot=0, timeout=0)
+
+    assert "did not start printing" in str(exc.value)
 
 
 def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, tmp_path):
@@ -167,7 +178,7 @@ def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, t
 
     remote_url = BambuClient("host", "serial", "code").upload_project(local_file, remote_dir="/cache")
 
-    assert remote_url == "ftp://cache/12345-plate.3mf"
+    assert remote_url == "file:///sdcard/cache/12345-plate.3mf"
     assert ("connect", "host", 990, 30) in calls
     assert ("login", "bblp", "code") in calls
     assert ("mkd", "/cache") in calls

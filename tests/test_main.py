@@ -26,13 +26,13 @@ class FakeClient:
         if self.upload_exc:
             raise self.upload_exc
         self.uploaded.append(project_path)
-        return "ftp://cache/project.3mf"
+        return "file:///sdcard/cache/project.3mf"
 
     def start_print(self, remote_url, ams_slot, plate_index):
         if self.start_exc:
             raise self.start_exc
         self.started.append({"remote_url": remote_url, "ams_slot": ams_slot, "plate_index": plate_index})
-        return {"sent": True, "ack": {"print": {"result": "success"}}}
+        return {"sent": True, "started": True, "printer_state": "PREPARE", "ack": {"print": {"result": "success"}}}
 
 
 def _install_fake_client(monkeypatch, client):
@@ -119,10 +119,17 @@ def test_print_job_success_hands_off_multiple_stls(settings, monkeypatch):
     assert sliced["infill_density"] == 23
     assert sliced["wall_loops"] == 4
     assert client.uploaded == [settings.job_dir / "project.3mf"]
-    assert client.started == [{"remote_url": "ftp://cache/project.3mf", "ams_slot": 1, "plate_index": settings.default_plate_index}]
-    assert response["message"] == "Sent 2 STL file(s), 5 total part(s), using AMS 0 slot 1: PETG #FFFFFFFF"
-    assert response["remote_url"] == "ftp://cache/project.3mf"
-    assert response["printer_result"] == {"sent": True, "ack": {"print": {"result": "success"}}}
+    assert client.started == [
+        {"remote_url": "file:///sdcard/cache/project.3mf", "ams_slot": 1, "plate_index": settings.default_plate_index}
+    ]
+    assert response["message"] == "Print started (PREPARE): 2 STL file(s), 5 total part(s), using AMS 0 slot 1: PETG #FFFFFFFF"
+    assert response["remote_url"] == "file:///sdcard/cache/project.3mf"
+    assert response["printer_result"] == {
+        "sent": True,
+        "started": True,
+        "printer_state": "PREPARE",
+        "ack": {"print": {"result": "success"}},
+    }
 
 
 def test_print_job_rejects_empty_file_list_before_printer_access(settings, monkeypatch):

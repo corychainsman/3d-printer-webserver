@@ -160,6 +160,7 @@ class BambuClient:
 
     def upload_project(self, local_file: Path, remote_dir: str = "/cache") -> str:
         remote_name = f"{int(time.time())}-{local_file.name}"
+        remote_path = f"{remote_dir.strip('/')}/{remote_name}"
         context = ssl._create_unverified_context()
         ftp = ImplicitFTP_TLS(context=context)
         ftp.encoding = "utf-8"
@@ -176,10 +177,10 @@ class BambuClient:
                 ftp.storbinary(f"STOR {remote_name}", handle)
         finally:
             ftp.quit()
-        return f"ftp://{remote_dir.strip('/')}/{remote_name}"
+        return f"file:///sdcard/{remote_path}"
 
-    def start_print(self, project_url: str, ams_slot: int, plate_index: int = 1, timeout: float = 12.0) -> dict[str, Any]:
-        sequence_id = "0"
+    def start_print(self, project_url: str, ams_slot: int, plate_index: int = 1, timeout: float = 30.0) -> dict[str, Any]:
+        sequence_id = str(uuid.uuid4())
         payload = {
             "print": {
                 "sequence_id": sequence_id,
@@ -201,16 +202,37 @@ class BambuClient:
         }
         client = self._client()
         self._ack_event.clear()
+        with self._lock:
+            self._last_ack = None
+            self._last_report = None
         client.connect(self.host, self.mqtt_port, keepalive=30)
         client.subscribe(self.report_topic, qos=0)
         client.loop_start()
         try:
             info = client.publish(self.request_topic, json.dumps(payload), qos=1)
             info.wait_for_publish(timeout=timeout)
-            if not self._ack_event.wait(timeout):
-                return {"sent": True, "ack": None}
-            with self._lock:
-                return {"sent": True, "ack": self._last_ack}
+            deadline = time.monotonic() + timeout
+            last_ack: dict[str, Any] | None = None
+            last_state = ""
+            while time.monotonic() < deadline:
+                self._ack_event.wait(timeout=min(0.5, max(0.0, deadline - time.monotonic())))
+                self._ack_event.clear()
+                with self._lock:
+                    if self._last_ack is not None:
+                        last_ack = self._last_ack
+                    if self._last_report is not None:
+                        last_state = print_state_from_status(self._last_report)
+                        if printer_busy_reason(self._last_report):
+                            return {
+                                "sent": True,
+                                "started": True,
+                                "printer_state": last_state,
+                                "ack": last_ack,
+                            }
+            raise RuntimeError(
+                "Printer accepted the command but did not start printing"
+                f" within {timeout:g}s; last state was {last_state or 'unknown'}"
+            )
         finally:
             client.loop_stop()
             client.disconnect()

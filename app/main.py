@@ -955,6 +955,7 @@ formEl.addEventListener("submit", async (event) => {{
     if (!res.ok) throw new Error(result.detail || "Print failed");
     msgEl.textContent = result.message;
     msgEl.className = "ok";
+    await loadStatus();
   }} catch (err) {{
     msgEl.textContent = err.message;
     msgEl.className = "error";
@@ -965,6 +966,7 @@ formEl.addEventListener("submit", async (event) => {{
 
 renderPlaceholderTrays();
 loadStatus();
+setInterval(loadStatus, 5000);
 </script>
 </body>
 </html>"""
@@ -1071,8 +1073,12 @@ def print_job(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     total_parts = sum(copy_counts)
+    printer_state = result.get("printer_state") or "starting"
     return {
-        "message": f"Sent {len(files)} STL file(s), {total_parts} total part(s), using {selected.label}",
+        "message": (
+            f"Print started ({printer_state}): "
+            f"{len(files)} STL file(s), {total_parts} total part(s), using {selected.label}"
+        ),
         "project": str(project_path),
         "remote_url": remote_url,
         "printer_result": result,
