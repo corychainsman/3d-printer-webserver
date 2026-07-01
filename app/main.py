@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 
-from .bambu import BambuClient
+from .bambu import BambuClient, ams_trays_from_status, print_state_from_status, printer_busy_reason
 from .config import Settings, get_settings
 from .slicer import SlicerError, StlInput, slice_stls
 from .stl_transform import rotate_and_place_on_bed
@@ -917,9 +917,10 @@ async function loadStatus() {{
       slotListEl.appendChild(button);
     }}
     if (data.trays.length) chooseTray(data.trays[0].slot);
-    statusEl.textContent = data.trays.length ? `Ready | ${{data.trays.length}} AMS trays | {html.escape(settings.bambu_host)}` : `No AMS trays | {html.escape(settings.bambu_host)}`;
-    statusEl.classList.toggle("ok", Boolean(data.trays.length));
-    statusEl.classList.toggle("error", !data.trays.length);
+    const stateText = data.busy ? `Busy: ${{data.printer_state || "printer active"}}` : (data.trays.length ? "Ready" : "No AMS trays");
+    statusEl.textContent = data.trays.length ? `${{stateText}} | ${{data.trays.length}} AMS trays | {html.escape(settings.bambu_host)}` : `${{stateText}} | {html.escape(settings.bambu_host)}`;
+    statusEl.classList.toggle("ok", Boolean(data.trays.length) && !data.busy);
+    statusEl.classList.toggle("error", Boolean(data.busy) || !data.trays.length);
   }} catch (err) {{
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -972,10 +973,15 @@ loadStatus();
 @app.get("/api/status")
 def status(settings: Settings = Depends(get_settings)):
     try:
-        trays = bambu_client(settings).ams_trays()
+        status_report = bambu_client(settings).request_status()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    trays = ams_trays_from_status(status_report)
+    busy_reason = printer_busy_reason(status_report)
     return {
+        "printer_state": print_state_from_status(status_report),
+        "busy": busy_reason is not None,
+        "busy_reason": busy_reason,
         "trays": [
             {
                 "slot": tray.slot,
@@ -1015,10 +1021,15 @@ def print_job(
 
     client = bambu_client(settings)
     try:
-        trays = client.ams_trays()
+        status_report = client.request_status()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Printer status failed: {exc}") from exc
 
+    busy_reason = printer_busy_reason(status_report)
+    if busy_reason:
+        raise HTTPException(status_code=409, detail=busy_reason)
+
+    trays = ams_trays_from_status(status_report)
     selected = next((tray for tray in trays if tray.slot == ams_slot), None)
     if selected is None:
         raise HTTPException(status_code=400, detail="Selected AMS slot is not available")

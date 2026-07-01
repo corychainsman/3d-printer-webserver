@@ -3,5 +3,7 @@ data/
 slicer/
 __pycache__/
 *.pyc
+.pytest_cache/
+.venv/
 config/*.json
 config/filaments/*.json

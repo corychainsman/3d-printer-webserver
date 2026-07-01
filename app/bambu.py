@@ -21,6 +21,52 @@ class AmsTray:
     color: str | None
 
 
+READY_GCODE_STATES = {"", "IDLE", "FINISH", "FAILED", "UNKNOWN"}
+
+
+def print_state_from_status(status: dict[str, Any]) -> str:
+    print_status = status.get("print", {})
+    if not isinstance(print_status, dict):
+        return ""
+    return str(print_status.get("gcode_state") or "").upper()
+
+
+def printer_busy_reason(status: dict[str, Any]) -> str | None:
+    state = print_state_from_status(status)
+    if state in READY_GCODE_STATES:
+        return None
+    return f"Printer is busy ({state}); wait for the current job to finish before sending another print"
+
+
+def ams_trays_from_status(status: dict[str, Any]) -> list[AmsTray]:
+    print_status = status.get("print", {})
+    ams = print_status.get("ams", {}) if isinstance(print_status, dict) else {}
+    units = ams.get("ams", []) if isinstance(ams, dict) else []
+    trays: list[AmsTray] = []
+    slot = 0
+    for unit in units:
+        ams_id = str(unit.get("id", len(trays)))
+        for tray in unit.get("tray", []):
+            filament_type = str(tray.get("tray_type") or tray.get("tray_sub_brands") or "unknown")
+            tray_id = str(tray.get("id", slot))
+            color = tray.get("tray_color")
+            label = f"AMS {ams_id} slot {tray_id}: {filament_type}"
+            if color:
+                label = f"{label} #{str(color).lstrip('#')}"
+            trays.append(
+                AmsTray(
+                    slot=slot,
+                    ams_id=ams_id,
+                    tray_id=tray_id,
+                    label=label,
+                    filament_type=filament_type,
+                    color=color,
+                )
+            )
+            slot += 1
+    return trays
+
+
 class ImplicitFTP_TLS(FTP_TLS):
     def connect(self, host: str = "", port: int = 0, timeout: float | None = None, source_address=None):
         if host:
@@ -100,33 +146,7 @@ class BambuClient:
             client.disconnect()
 
     def ams_trays(self) -> list[AmsTray]:
-        status = self.request_status()
-        print_status = status.get("print", {})
-        ams = print_status.get("ams", {})
-        units = ams.get("ams", []) if isinstance(ams, dict) else []
-        trays: list[AmsTray] = []
-        slot = 0
-        for unit in units:
-            ams_id = str(unit.get("id", len(trays)))
-            for tray in unit.get("tray", []):
-                filament_type = str(tray.get("tray_type") or tray.get("tray_sub_brands") or "unknown")
-                tray_id = str(tray.get("id", slot))
-                color = tray.get("tray_color")
-                label = f"AMS {ams_id} slot {tray_id}: {filament_type}"
-                if color:
-                    label = f"{label} #{str(color).lstrip('#')}"
-                trays.append(
-                    AmsTray(
-                        slot=slot,
-                        ams_id=ams_id,
-                        tray_id=tray_id,
-                        label=label,
-                        filament_type=filament_type,
-                        color=color,
-                    )
-                )
-                slot += 1
-        return trays
+        return ams_trays_from_status(self.request_status())
 
     def upload_project(self, local_file: Path, remote_dir: str = "/cache") -> str:
         remote_name = f"{int(time.time())}-{local_file.name}"
