@@ -87,7 +87,9 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
 
     monkeypatch.setattr(client, "_client", lambda: FakeMqtt())
 
-    result = client.start_print("file:///sdcard/cache/job.3mf", ams_slot=5, plate_index=2, timeout=0.25)
+    monkeypatch.setattr(bambu.time, "time", lambda: 12345.678)
+
+    result = client.start_print("ftp://job.3mf", ams_slot=5, plate_index=2, timeout=0.25)
 
     payload = published["payload"]["print"]
     assert result == {
@@ -96,14 +98,23 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
         "printer_state": "PREPARE",
         "ack": {"print": {"command": "project_file", "result": "success"}},
     }
-    assert payload["url"] == "file:///sdcard/cache/job.3mf"
+    assert payload["url"] == "ftp://job.3mf"
     assert payload["param"] == "Metadata/plate_2.gcode"
     assert payload["subtask_name"] == "job"
-    assert payload["file"] == ""
+    assert payload["file"] == "job.3mf"
     assert payload["md5"] == ""
     assert payload["bed_type"] == "auto"
     assert payload["use_ams"] is True
     assert payload["ams_mapping"] == [5]
+    assert payload["ams_mapping2"] == [{"ams_id": 1, "slot_id": 1}]
+    assert payload["project_id"] == "12345678"
+    assert payload["subtask_id"] == "12345678"
+    assert payload["task_id"] == "12345678"
+    assert payload["sequence_id"] == "20000"
+    assert payload["auto_bed_leveling"] == 1
+    assert payload["extrude_cali_flag"] == 0
+    assert payload["extrude_cali_manual_mode"] == 0
+    assert payload["cfg"] == "0"
     assert published["topic"] == "device/SERIAL/request"
     assert published["wait_timeout"] == 0.25
 
@@ -181,7 +192,8 @@ def test_start_print_raises_immediately_when_printer_rejects_command(monkeypatch
     with pytest.raises(RuntimeError) as exc:
         client.start_print("file:///sdcard/cache/job.3mf", ams_slot=0, timeout=1)
 
-    assert str(exc.value) == "Printer rejected MQTT print command: mqtt message verify failed"
+    assert "Printer rejected MQTT print command: mqtt message verify failed" in str(exc.value)
+    assert "Developer Mode" in str(exc.value)
 
 
 def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, tmp_path):
@@ -224,11 +236,51 @@ def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, t
 
     remote_url = BambuClient("host", "serial", "code").upload_project(local_file, remote_dir="/cache")
 
-    assert remote_url == "file:///sdcard/cache/12345-plate.3mf"
+    assert remote_url == "ftp://cache/12345-plate.3mf"
     assert ("connect", "host", 990, 30) in calls
     assert ("login", "bblp", "code") in calls
-    assert ("mkd", "/cache") in calls
+    assert ("mkd", "cache") in calls
     assert ("storbinary", "STOR 12345-plate.3mf", b"3mf") in calls
+
+
+def test_upload_project_defaults_to_printer_root(monkeypatch, tmp_path):
+    local_file = tmp_path / "plate.3mf"
+    local_file.write_bytes(b"3mf")
+    calls = []
+
+    class FakeFtp:
+        def __init__(self, context):
+            self.context = context
+            self.encoding = None
+
+        def connect(self, host, port, timeout):
+            calls.append(("connect", host, port, timeout))
+
+        def login(self, user, password):
+            calls.append(("login", user, password))
+
+        def prot_p(self):
+            calls.append(("prot_p",))
+
+        def cwd(self, remote_dir):
+            calls.append(("cwd", remote_dir))
+
+        def mkd(self, remote_dir):
+            calls.append(("mkd", remote_dir))
+
+        def storbinary(self, command, handle):
+            calls.append(("storbinary", command, handle.read()))
+
+        def quit(self):
+            calls.append(("quit",))
+
+    monkeypatch.setattr(bambu, "ImplicitFTP_TLS", FakeFtp)
+    monkeypatch.setattr(bambu.time, "time", lambda: 12345)
+
+    remote_url = BambuClient("host", "serial", "code").upload_project(local_file)
+
+    assert remote_url == "ftp://12345-plate.3mf"
+    assert not [call for call in calls if call[0] in {"cwd", "mkd"}]
 
 
 def test_implicit_ftps_reuses_control_tls_session_for_data_channel(monkeypatch):

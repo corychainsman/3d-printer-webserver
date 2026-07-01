@@ -159,9 +159,10 @@ class BambuClient:
     def ams_trays(self) -> list[AmsTray]:
         return ams_trays_from_status(self.request_status())
 
-    def upload_project(self, local_file: Path, remote_dir: str = "/cache") -> str:
+    def upload_project(self, local_file: Path, remote_dir: str = "/") -> str:
         remote_name = f"{int(time.time())}-{local_file.name}"
-        remote_path = f"{remote_dir.strip('/')}/{remote_name}"
+        remote_dir = remote_dir.strip("/") or "/"
+        remote_path = remote_name if remote_dir == "/" else f"{remote_dir}/{remote_name}"
         context = ssl._create_unverified_context()
         ftp = ImplicitFTP_TLS(context=context)
         ftp.encoding = "utf-8"
@@ -169,43 +170,53 @@ class BambuClient:
         ftp.login("bblp", self.access_code)
         ftp.prot_p()
         try:
-            try:
-                ftp.cwd(remote_dir)
-            except Exception:
-                ftp.mkd(remote_dir)
-                ftp.cwd(remote_dir)
+            if remote_dir != "/":
+                try:
+                    ftp.cwd(remote_dir)
+                except Exception:
+                    ftp.mkd(remote_dir)
+                    ftp.cwd(remote_dir)
             with local_file.open("rb") as handle:
                 ftp.storbinary(f"STOR {remote_name}", handle)
         finally:
             ftp.quit()
-        return f"file:///sdcard/{remote_path}"
+        return f"ftp://{remote_path}"
 
-    def start_print(self, project_url: str, ams_slot: int, plate_index: int = 1, timeout: float = 30.0) -> dict[str, Any]:
-        sequence_id = str(int(time.time() * 1000))
-        project_path = unquote(urlparse(project_url).path)
+    def start_print(self, project_url: str, ams_slot: int, plate_index: int = 1, timeout: float = 90.0) -> dict[str, Any]:
+        submission_id = str(int(time.time() * 1000) % 2_147_483_647 or 1)
+        parsed_project_url = urlparse(project_url)
+        project_path = unquote(parsed_project_url.path or parsed_project_url.netloc)
         project_name = Path(project_path).name
         subtask_name = project_name.removesuffix(".3mf")
+        ams_id = int(ams_slot) // 4
+        slot_id = int(ams_slot) % 4
         payload = {
             "print": {
-                "sequence_id": sequence_id,
+                "sequence_id": "20000",
                 "command": "project_file",
                 "param": f"Metadata/plate_{plate_index}.gcode",
-                "project_id": "0",
-                "subtask_id": "0",
+                "project_id": submission_id,
+                "subtask_id": submission_id,
                 "subtask_name": subtask_name,
-                "task_id": "0",
-                "file": "",
+                "task_id": submission_id,
+                "file": project_name,
                 "url": project_url,
                 "md5": "",
                 "profile_id": "0",
                 "bed_type": "auto",
                 "timelapse": False,
                 "bed_leveling": True,
+                "auto_bed_leveling": 1,
                 "flow_cali": False,
+                "extrude_cali_flag": 0,
+                "extrude_cali_manual_mode": 0,
                 "vibration_cali": False,
                 "layer_inspect": True,
                 "use_ams": True,
                 "ams_mapping": [ams_slot],
+                "ams_mapping2": [{"ams_id": ams_id, "slot_id": slot_id}],
+                "cfg": "0",
+                "nozzle_offset_cali": 0,
             }
         }
         client = self._client()
@@ -231,6 +242,11 @@ class BambuClient:
                         print_ack = last_ack.get("print", {})
                         if str(print_ack.get("result", "")).lower() == "failed":
                             reason = print_ack.get("reason") or "printer rejected MQTT print command"
+                            if reason == "mqtt message verify failed":
+                                reason = (
+                                    "mqtt message verify failed. The printer rejected local control; "
+                                    "Bambuddy treats this as Developer Mode being off or cloud-mode control being blocked."
+                                )
                             raise RuntimeError(f"Printer rejected MQTT print command: {reason}")
                     if self._last_report is not None:
                         last_state = print_state_from_status(self._last_report)
