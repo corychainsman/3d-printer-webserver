@@ -12,8 +12,12 @@ RUN apt-get update \
       libglib2.0-0 \
       libxrender1 \
       libxkbcommon0 \
+      xauth \
       libdbus-1-3 \
+      libgstreamer1.0-0 \
+      libgstreamer-plugins-base1.0-0 \
       libnss3 \
+      libwebkit2gtk-4.1-0 \
       libxcomposite1 \
       libxdamage1 \
       libxrandr2 \

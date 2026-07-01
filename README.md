@@ -113,6 +113,12 @@ ${CONFIG_DIR}/filaments/generic.json
 
 If an AMS material type has no exact profile file, the app uses `generic.json`.
 
+For Bambu Lab H2D profiles, keep the exported H2D template JSON files beside
+`machine.json` when Bambu Studio exports them. The app builds a temporary
+single-material runtime profile for CLI slicing, then merges those local
+template files back in so H2D start, end, layer-change, and filament-change
+G-code remain intact.
+
 ## Local Docker Compose
 
 ```bash
