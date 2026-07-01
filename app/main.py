@@ -519,6 +519,7 @@ const controls = new OrbitControls(camera, previewCanvas);
 const plate = new THREE.Group();
 let fileEntries = [];
 let fileEntrySeq = 0;
+const removedEntryIds = new Set();
 const viewSigns = {{ x: 1, y: 1 }};
 let isoIndex = 3;
 let fitToObjects = false;
@@ -734,9 +735,10 @@ async function loadPreviewFile() {{
   previewEmpty.textContent = "Loading preview...";
   previewEmpty.style.display = "grid";
   for (const file of files) {{
-    const index = fileEntrySeq++;
+    const entryId = fileEntrySeq++;
     const row = document.createElement("div");
     row.className = "file-row";
+    row.dataset.entryId = String(entryId);
     const name = document.createElement("div");
     name.className = "file-name";
     name.textContent = file.name;
@@ -759,16 +761,17 @@ async function loadPreviewFile() {{
       wrap.append(label, input);
       return {{ wrap, input }};
     }};
-    const copies = makeNumber(`copies-${{index}}`, "Copies", "copy_counts", "1", "1", "99");
-    const rotX = makeNumber(`rot-x-${{index}}`, "Rot X", "rot_x", "0", "-360", "360");
-    const rotY = makeNumber(`rot-y-${{index}}`, "Rot Y", "rot_y", "0", "-360", "360");
-    const rotZ = makeNumber(`rot-z-${{index}}`, "Rot Z", "rot_z", "0", "-360", "360");
+    const copies = makeNumber(`copies-${{entryId}}`, "Copies", "copy_counts", "1", "1", "99");
+    const rotX = makeNumber(`rot-x-${{entryId}}`, "Rot X", "rot_x", "0", "-360", "360");
+    const rotY = makeNumber(`rot-y-${{entryId}}`, "Rot Y", "rot_y", "0", "-360", "360");
+    const rotZ = makeNumber(`rot-z-${{entryId}}`, "Rot Z", "rot_z", "0", "-360", "360");
     const menu = document.createElement("div");
     menu.className = "file-menu";
     const menuButton = document.createElement("button");
     menuButton.type = "button";
     menuButton.className = "menu-button btn";
     menuButton.setAttribute("aria-label", `Actions for ${{file.name}}`);
+    menuButton.dataset.entryId = String(entryId);
     menuButton.textContent = "...";
     const popover = document.createElement("div");
     popover.className = "menu-popover";
@@ -786,7 +789,8 @@ async function loadPreviewFile() {{
       menu.classList.toggle("open");
     }});
     removeButton.addEventListener("click", () => {{
-      fileEntries = fileEntries.filter((entry) => entry.file !== file);
+      removedEntryIds.add(entryId);
+      fileEntries = fileEntries.filter((entry) => entry.id !== entryId);
       row.remove();
       menu.classList.remove("open");
       if (!fileEntries.length) {{
@@ -806,14 +810,16 @@ async function loadPreviewFile() {{
     row.append(head, controls);
     fileListEl.appendChild(row);
     const buffer = await file.arrayBuffer();
+    if (removedEntryIds.has(entryId)) continue;
     fileEntries.push({{
+      id: entryId,
       file,
       input: copies.input,
       rotX: rotX.input,
       rotY: rotY.input,
       rotZ: rotZ.input,
       geometry: loader.parse(buffer),
-      color: [0x70b7a1, 0x8ab6d6, 0xd69a7e, 0xa893c7, 0xc2b85d][index % 5],
+      color: [0x70b7a1, 0x8ab6d6, 0xd69a7e, 0xa893c7, 0xc2b85d][entryId % 5],
     }});
   }}
   filesEl.value = "";
