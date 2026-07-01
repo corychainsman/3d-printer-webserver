@@ -1,4 +1,5 @@
 import html
+import io
 import json
 import shutil
 import uuid
@@ -16,6 +17,19 @@ from .slicer import SlicerError, StlInput, slice_stls
 from .stl_transform import rotate_and_place_on_bed
 
 app = FastAPI(title="Bambu Phone Print")
+
+
+def snapshot_uploads(files: list[UploadFile]) -> list[UploadFile]:
+    snapshots = []
+    for uploaded in files:
+        uploaded.file.seek(0)
+        snapshots.append(
+            UploadFile(
+                filename=uploaded.filename,
+                file=io.BytesIO(uploaded.file.read()),
+            )
+        )
+    return snapshots
 
 
 def bambu_client(settings: Settings) -> BambuClient:
@@ -1164,6 +1178,8 @@ def print_job_progress(
     ams_slot: int = Form(..., ge=0),
     settings: Settings = Depends(get_settings),
 ):
+    snapshot_files = snapshot_uploads(files)
+
     def encode(event: dict) -> str:
         return json.dumps(event) + "\n"
 
@@ -1176,7 +1192,7 @@ def print_job_progress(
         def worker() -> None:
             try:
                 result = run_print_job(
-                    files,
+                    snapshot_files,
                     infill_density,
                     wall_loops,
                     copy_counts,

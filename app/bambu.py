@@ -7,6 +7,7 @@ from ftplib import FTP, FTP_TLS
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import paho.mqtt.client as mqtt
 
@@ -180,7 +181,10 @@ class BambuClient:
         return f"file:///sdcard/{remote_path}"
 
     def start_print(self, project_url: str, ams_slot: int, plate_index: int = 1, timeout: float = 30.0) -> dict[str, Any]:
-        sequence_id = str(uuid.uuid4())
+        sequence_id = str(int(time.time() * 1000))
+        project_path = unquote(urlparse(project_url).path)
+        project_name = Path(project_path).name
+        subtask_name = project_name.removesuffix(".3mf")
         payload = {
             "print": {
                 "sequence_id": sequence_id,
@@ -188,9 +192,13 @@ class BambuClient:
                 "param": f"Metadata/plate_{plate_index}.gcode",
                 "project_id": "0",
                 "subtask_id": "0",
+                "subtask_name": subtask_name,
                 "task_id": "0",
+                "file": "",
                 "url": project_url,
+                "md5": "",
                 "profile_id": "0",
+                "bed_type": "auto",
                 "timelapse": False,
                 "bed_leveling": True,
                 "flow_cali": False,

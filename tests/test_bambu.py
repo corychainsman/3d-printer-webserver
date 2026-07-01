@@ -98,6 +98,10 @@ def test_start_print_payload_maps_selected_ams_slot_and_plate(monkeypatch):
     }
     assert payload["url"] == "file:///sdcard/cache/job.3mf"
     assert payload["param"] == "Metadata/plate_2.gcode"
+    assert payload["subtask_name"] == "job"
+    assert payload["file"] == ""
+    assert payload["md5"] == ""
+    assert payload["bed_type"] == "auto"
     assert payload["use_ams"] is True
     assert payload["ams_mapping"] == [5]
     assert published["topic"] == "device/SERIAL/request"

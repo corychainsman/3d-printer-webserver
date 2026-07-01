@@ -171,6 +171,15 @@ def test_run_print_job_reports_backend_progress_steps(settings, monkeypatch):
     ]
 
 
+def test_snapshot_uploads_owns_file_handles_after_original_closes():
+    original = upload_file("part.stl", b"solid original\nendsolid original\n")
+    snapshots = main.snapshot_uploads([original])
+    original.file.close()
+
+    assert snapshots[0].filename == "part.stl"
+    assert snapshots[0].file.read() == b"solid original\nendsolid original\n"
+
+
 def test_print_job_rejects_empty_file_list_before_printer_access(settings, monkeypatch):
     monkeypatch.setattr(main, "bambu_client", lambda settings: pytest.fail("printer should not be touched"))
 
