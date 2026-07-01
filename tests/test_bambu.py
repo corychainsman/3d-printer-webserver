@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from app import bambu
-from app.bambu import BambuClient, ams_trays_from_status, print_state_from_status, printer_busy_reason
+from app.bambu import BambuClient, ImplicitFTP_TLS, ams_trays_from_status, print_state_from_status, printer_busy_reason
 from tests.conftest import status_payload
 
 
@@ -172,3 +172,33 @@ def test_upload_project_uses_implicit_ftps_and_creates_remote_dir(monkeypatch, t
     assert ("login", "bblp", "code") in calls
     assert ("mkd", "/cache") in calls
     assert ("storbinary", "STOR 12345-plate.3mf", b"3mf") in calls
+
+
+def test_implicit_ftps_reuses_control_tls_session_for_data_channel(monkeypatch):
+    calls = {}
+
+    class FakeContext:
+        def wrap_socket(self, conn, server_hostname=None, session=None):
+            calls["wrap_socket"] = (conn, server_hostname, session)
+            return "wrapped-data-connection"
+
+    class FakeSock:
+        session = "control-session"
+
+    def fake_ntransfercmd(self, cmd, rest=None):
+        calls["ntransfercmd"] = (cmd, rest)
+        return "plain-data-connection", 128
+
+    monkeypatch.setattr(bambu.FTP, "ntransfercmd", fake_ntransfercmd)
+    ftp = ImplicitFTP_TLS.__new__(ImplicitFTP_TLS)
+    ftp.context = FakeContext()
+    ftp.host = "printer.local"
+    ftp.sock = FakeSock()
+    ftp._prot_p = True
+
+    conn, size = ftp.ntransfercmd("STOR plate.3mf")
+
+    assert conn == "wrapped-data-connection"
+    assert size == 128
+    assert calls["ntransfercmd"] == ("STOR plate.3mf", None)
+    assert calls["wrap_socket"] == ("plain-data-connection", "printer.local", "control-session")

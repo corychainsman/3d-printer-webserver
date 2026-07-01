@@ -3,7 +3,7 @@ import ssl
 import time
 import uuid
 from dataclasses import dataclass
-from ftplib import FTP_TLS
+from ftplib import FTP, FTP_TLS
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any
@@ -83,6 +83,16 @@ class ImplicitFTP_TLS(FTP_TLS):
         self.file = self.sock.makefile("r", encoding=self.encoding)
         self.welcome = self.getresp()
         return self.welcome
+
+    def ntransfercmd(self, cmd, rest=None):
+        conn, size = FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:
+            conn = self.context.wrap_socket(
+                conn,
+                server_hostname=self.host,
+                session=self.sock.session,
+            )
+        return conn, size
 
 
 def socket_create_connection(address, timeout=None, source_address=None):
